@@ -5,6 +5,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import webbrowser
 from pathlib import Path
@@ -24,6 +25,7 @@ from PyQt6.QtWidgets import (
 )
 
 from . import autostart
+from . import webdav_backup as wb
 from .config import persist_module_autostart
 from .manager import (
     NOTIFY_MODULE,
@@ -34,8 +36,26 @@ from .manager import (
     write_notify_enabled,
 )
 from .profile import DEFAULT_PROFILE, TESTING_PROFILE
+from .webdav_dialog import WebDavSettingsDialog
 
 logger = logging.getLogger(__name__)
+
+
+class _BackupSignals(QtCore.QObject):
+    """Delivers background WebDAV backup results to the UI thread."""
+
+    finished = QtCore.pyqtSignal(bool, str)
+
+
+def _format_relative_time(epoch_seconds: float) -> str:
+    delta = max(0.0, time.time() - epoch_seconds)
+    if delta < 60:
+        return "刚刚"
+    if delta < 3600:
+        return f"{int(delta // 60)} 分钟前"
+    if delta < 86400:
+        return f"{int(delta // 3600)} 小时前"
+    return f"{int(delta // 86400)} 天前"
 
 
 def get_env() -> Dict[str, str]:
@@ -188,6 +208,12 @@ class TrayIcon(QSystemTrayIcon):
         self._restart_timestamps: Dict[str, List[float]] = {}
         self._autostart_action: Optional[QAction] = None
         self._notify_action: Optional[QAction] = None
+        self._webdav_status_action: Optional[QAction] = None
+        self._webdav_enabled_action: Optional[QAction] = None
+        self._webdav_running = False
+        self._webdav_manual = False
+        self._backup_signals = _BackupSignals()
+        self._backup_signals.finished.connect(self._on_backup_finished)
         self._support_action: Optional[QAction] = None
         self._support_network = QNetworkAccessManager(self)
         self._support_reply: Optional[QNetworkReply] = None
@@ -199,6 +225,14 @@ class TrayIcon(QSystemTrayIcon):
         self.activated.connect(self.on_activated)
 
         self._build_rootmenu()
+
+        # WebDAV backup scheduler: check every 30s whether a backup is due;
+        # the first check runs a minute after startup so a backup that came
+        # due while the app was closed runs soon after launch.
+        self._backup_timer = QtCore.QTimer(self)
+        self._backup_timer.timeout.connect(self._maybe_backup)
+        self._backup_timer.start(30_000)
+        QtCore.QTimer.singleShot(60_000, self._maybe_backup)
 
     def _recent_restart_count(self, module_name: str) -> int:
         """Count restarts within the sliding time window."""
@@ -306,6 +340,142 @@ class TrayIcon(QSystemTrayIcon):
         # Always reflect the real state, the toggle may have failed
         self._refresh_autostart_action()
 
+    # ------------------------------------------------------------------
+    # WebDAV backup
+    # ------------------------------------------------------------------
+
+    def _build_webdav_backup_menu(self, menu: QMenu) -> None:
+        backup_menu = menu.addMenu("WebDAV 自动备份")
+        self._webdav_status_action = backup_menu.addAction("尚未备份")
+        self._webdav_status_action.setEnabled(False)
+        self._webdav_enabled_action = backup_menu.addAction(
+            "自动备份", self._on_webdav_enabled_toggled
+        )
+        self._webdav_enabled_action.setCheckable(True)
+        backup_menu.addAction("立即备份", self._on_webdav_backup_now)
+        backup_menu.addAction("备份设置…", self._open_webdav_settings)
+        menu.aboutToShow.connect(self._refresh_webdav_menu)
+        self._refresh_webdav_menu()
+
+    def _refresh_webdav_menu(self) -> None:
+        if self._webdav_enabled_action is not None:
+            try:
+                cfg = wb.load_webdav_config(self.profile)
+            except Exception:
+                logger.exception("failed to load WebDAV backup config")
+                return
+            self._webdav_enabled_action.setChecked(cfg.enabled)
+        if self._webdav_status_action is not None:
+            self._webdav_status_action.setText(self._webdav_status_text())
+
+    def _webdav_status_text(self) -> str:
+        if self._webdav_running:
+            return "备份进行中…"
+        status = wb.BackupStatus.load(wb.status_path(self.profile))
+        if status is None:
+            return "尚未备份"
+        when = _format_relative_time(status.completed_at)
+        if status.success:
+            return f"上次备份 {when}: {status.message}"
+        return f"上次失败 {when}: {status.message}"
+
+    def _on_webdav_enabled_toggled(self) -> None:
+        if self._webdav_enabled_action is None:
+            return
+        checked = self._webdav_enabled_action.isChecked()
+        try:
+            cfg = wb.load_webdav_config(self.profile)
+            cfg.enabled = checked
+            wb.save_webdav_config(cfg, self.profile)
+        except (wb.BackupError, OSError) as exc:
+            logger.error(f"failed to save WebDAV backup enabled flag: {exc}")
+            box = QMessageBox(self._parent)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setText(f"保存自动备份开关失败: {exc}")
+            box.show()
+        self._refresh_webdav_menu()
+        if checked:
+            # Back up promptly after enabling instead of waiting a full cycle.
+            QtCore.QTimer.singleShot(1_000, self._maybe_backup)
+
+    def _open_webdav_settings(self) -> None:
+        dialog = WebDavSettingsDialog(self.profile, self._parent)
+        dialog.exec()
+        self._refresh_webdav_menu()
+        try:
+            if wb.load_webdav_config(self.profile).enabled:
+                QtCore.QTimer.singleShot(1_000, self._maybe_backup)
+        except Exception:
+            logger.exception("failed to reload WebDAV backup config")
+
+    def _on_webdav_backup_now(self) -> None:
+        if self._webdav_running:
+            return
+        if not WebDavSettingsDialog.check_settings(self.profile):
+            return
+        self._start_backup(manual=True)
+
+    def _maybe_backup(self) -> None:
+        """Timer entry point: run a backup when one is due."""
+        if self._webdav_running:
+            return
+        try:
+            cfg = wb.load_webdav_config(self.profile)
+            if not cfg.enabled:
+                return
+            cfg = wb.validate_config(cfg)
+        except wb.BackupError:
+            return
+        except Exception:
+            logger.exception("failed to load WebDAV backup config")
+            return
+        status = wb.BackupStatus.load(wb.status_path(self.profile))
+        if status is not None:
+            elapsed = time.time() - status.completed_at
+            if elapsed < cfg.interval_minutes * 60:
+                return
+        self._start_backup(manual=False)
+
+    def _start_backup(self, manual: bool) -> None:
+        if self._webdav_running:
+            return
+        self._webdav_running = True
+        self._webdav_manual = manual
+        self._refresh_webdav_menu()
+        candidates = [os.fspath(m.path) for m in self.manager.modules]
+        port = self.port
+        profile = self.profile
+
+        def work() -> None:
+            try:
+                cfg = wb.validate_config(wb.load_webdav_config(profile))
+                outcome = wb.run_backup(cfg, port, profile, candidates)
+                message = (
+                    f"备份完成：上传 {outcome.uploaded} 个文件，"
+                    f"{outcome.unchanged} 个未变化"
+                )
+                self._backup_signals.finished.emit(True, message)
+            except wb.BackupError as exc:
+                self._backup_signals.finished.emit(False, str(exc))
+            except Exception as exc:  # never let the worker thread die silently
+                logger.exception("WebDAV backup failed")
+                self._backup_signals.finished.emit(False, str(exc))
+
+        threading.Thread(target=work, name="webdav-backup", daemon=True).start()
+
+    def _on_backup_finished(self, success: bool, message: str) -> None:
+        manual = self._webdav_manual
+        self._webdav_running = False
+        self._webdav_manual = False
+        self._refresh_webdav_menu()
+        if manual:
+            icon = (
+                QSystemTrayIcon.MessageIcon.Information
+                if success
+                else QSystemTrayIcon.MessageIcon.Warning
+            )
+            self.showMessage("WebDAV 备份", message, icon, 5_000)
+
     def on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             open_webui(self.root_url)
@@ -361,6 +531,11 @@ class TrayIcon(QSystemTrayIcon):
             # Autostart can also be changed outside of aw-qt, so re-read the
             # actual state every time the menu is opened
             menu.aboutToShow.connect(self._refresh_autostart_action)
+
+        # Guarded so test stand-ins without the backup state skip the submenu.
+        build_webdav_menu = getattr(self, "_build_webdav_backup_menu", None)
+        if build_webdav_menu is not None:
+            build_webdav_menu(menu)
 
         menu.addSeparator()
 
