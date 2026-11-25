@@ -1,0 +1,45 @@
+aw_qt/trayicon.py
+  s_eaf387bbfdcdc9::t_5f22ef00369039 8,48-49
+  s_eaf387bbfdcdc9::t_f148ebed956d02 434
+  s_eaf387bbfdcdc9::t_55397b01368a9e 28
+  s_eaf387bbfdcdc9::t_551ae3259cd71e 535-539
+  s_eaf387bbfdcdc9::t_853da32f8c868f 377
+  s_eaf387bbfdcdc9::t_50356b68edac10 343-376,378-433,435-451,458-478
+  s_eaf387bbfdcdc9::t_8fff931b8a6749 39,44-47
+  s_eaf387bbfdcdc9::t_2f695bb73c2c53 50-60
+  s_eaf387bbfdcdc9::t_74b6148872ec2e 211-216
+  s_eaf387bbfdcdc9::t_3386df5ebf91e4 229-236
+  s_eaf387bbfdcdc9::t_0b502a5ff6e390 452-457
+tests/test_webdav_backup.py
+  s_eaf387bbfdcdc9::t_d08ca456975274 1-329,346-404
+  s_eaf387bbfdcdc9::t_f1e0db8ce345bd 330-345
+aw_qt/webdav_dialog.py
+  s_eaf387bbfdcdc9::t_1aa9b0ed2689a6 93
+  s_eaf387bbfdcdc9::t_54d9f699945f05 1-92,94-110,112-114,116-117
+  s_eaf387bbfdcdc9::t_3396e6606a4196 111,115
+aw_qt/webdav_backup.py
+  s_eaf387bbfdcdc9::t_9b82c198b324b2 310-313,320-321
+  s_eaf387bbfdcdc9::t_0378b38b2a9814 558-561,568-570
+  s_eaf387bbfdcdc9::t_befda1f1007a04 20
+  s_eaf387bbfdcdc9::t_3575a154ac95a5 120,123-126,128
+  s_eaf387bbfdcdc9::t_63570e40392955 281-283
+  s_eaf387bbfdcdc9::t_9240bb560ce70a 1-19,21-119,121-122,127,129-134,139-280,284-309,314-319,322-557,562-567,571-604,608-624
+  s_eaf387bbfdcdc9::t_6517fe97ca5602 135-138
+  s_eaf387bbfdcdc9::t_b8af3640f41d19 605-607
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2a0440c0dc1fe4dd139b9657fb88bc291b010e22",
+  "prompts": {},
+  "sessions": {
+    "s_eaf387bbfdcdc9": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "937c5176-e491-49c2-921f-ae64842d9fe5",
+        "model": "auto-smart"
+      },
+      "human_author": "leijieliu <leijieliu@tencent.com>"
+    }
+  }
+}
