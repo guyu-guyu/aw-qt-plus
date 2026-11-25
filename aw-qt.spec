@@ -8,6 +8,7 @@
 import platform
 import os
 import sys
+from pathlib import Path
 
 
 extra_pathex = []
@@ -39,6 +40,20 @@ a = Analysis(['aw_qt/__main__.py'],
 # Needed to be removed due to https://github.com/ActivityWatch/activitywatch/issues/607#issuecomment-862187836
 exclude_libs = ["libfontconfig", "libfreetype"]
 a.binaries = [bin for bin in a.binaries if not any(bin[0].find(lib) >= 0 for lib in exclude_libs)]
+
+# Git for Windows puts its own MinGW OpenSSL on PATH. PyInstaller can collect
+# those DLLs for _ssl.pyd, but they do not export the symbols CPython's _ssl
+# was built against, so `import ssl` fails and HTTPS becomes "unknown url type".
+python_dll_dir = Path(sys.base_prefix) / "DLLs"
+openssl_binaries = []
+for name in ("libssl-3-x64.dll", "libcrypto-3-x64.dll"):
+    bundled = python_dll_dir / name
+    if bundled.is_file():
+        openssl_binaries.append((name, str(bundled), "BINARY"))
+if openssl_binaries:
+    replaced = {name for name, _path, _kind in openssl_binaries}
+    a.binaries = [binary for binary in a.binaries if binary[0] not in replaced]
+    a.binaries += openssl_binaries
 
 pyz = PYZ(a.pure, a.zipped_data,
              cipher=block_cipher)

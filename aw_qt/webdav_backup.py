@@ -305,6 +305,37 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _https_context():
+    """CA context for packaged Windows builds.
+
+    The bundled Python does not use the Windows certificate store on its own.
+    Public roots come from certifi when it is installed, and roots trusted by
+    Windows are added so a NAS certificate issued by a private CA still works.
+    """
+    import ssl
+
+    cafile = None
+    try:
+        import certifi
+
+        cafile = certifi.where()
+    except Exception:
+        logger.debug("certifi is unavailable; using Python's default CA set")
+    context = ssl.create_default_context(cafile=cafile)
+    if sys.platform == "win32" and hasattr(ssl, "enum_certificates"):
+        try:
+            certificates = [
+                cert
+                for cert, encoding, _trust in ssl.enum_certificates("ROOT")
+                if encoding == "x509_asn"
+            ]
+            if certificates:
+                context.load_verify_locations(cadata=b"".join(certificates))
+        except (ssl.SSLError, OSError) as exc:
+            logger.warning(f"Could not load Windows trusted certificates: {exc}")
+    return context
+
+
 class WebDavClient:
     def __init__(self, username: str, password: str, timeout: float = 120.0):
         self._auth: Optional[str] = None
@@ -312,7 +343,11 @@ class WebDavClient:
             token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
             self._auth = f"Basic {token}"
         self._timeout = timeout
-        self._opener = urllib.request.build_opener(_NoRedirect())
+        try:
+            https_handler = urllib.request.HTTPSHandler(context=_https_context())
+        except Exception as exc:
+            raise BackupError(f"HTTPS is unavailable: {exc}") from exc
+        self._opener = urllib.request.build_opener(_NoRedirect, https_handler)
 
     def _request(self, method: str, url: str, data: Optional[bytes] = None,
                  headers: Optional[Dict[str, str]] = None) -> Tuple[int, bytes]:

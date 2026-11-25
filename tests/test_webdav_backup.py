@@ -343,6 +343,11 @@ def test_build_aw_sync_command_testing_profile(tmp_path):
     ]
 
 
+def test_webdav_client_enables_https():
+    client = wb.WebDavClient("user", "secret")
+    assert any(type(handler).__name__ == "HTTPSHandler" for handler in client._opener.handlers)
+
+
 def test_find_aw_sync_does_not_pick_aw_server_rust(tmp_path, monkeypatch):
     server = tmp_path / "aw-server-rust.exe"
     sync = tmp_path / "aw-sync.exe"
