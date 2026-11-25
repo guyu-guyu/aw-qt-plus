@@ -1,0 +1,24 @@
+aw_qt/webdav_backup.py
+  s_eaf387bbfdcdc9::t_5055b363fed8e1 308-338,346-350
+aw-qt.spec
+  s_eaf387bbfdcdc9::t_dc1a90d489a264 44-57
+  s_eaf387bbfdcdc9::t_9ef498d7ae56f6 11
+tests/test_webdav_backup.py
+  s_eaf387bbfdcdc9::t_4d688a09328555 346-350
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f95a594dd91580b3d804152c97b77afb1046727c",
+  "prompts": {},
+  "sessions": {
+    "s_eaf387bbfdcdc9": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "937c5176-e491-49c2-921f-ae64842d9fe5",
+        "model": "auto-smart"
+      },
+      "human_author": "leijieliu <leijieliu@tencent.com>"
+    }
+  }
+}
