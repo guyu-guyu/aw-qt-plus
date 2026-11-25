@@ -343,6 +343,16 @@ def test_build_aw_sync_command_testing_profile(tmp_path):
     ]
 
 
+def test_find_aw_sync_does_not_pick_aw_server_rust(tmp_path, monkeypatch):
+    server = tmp_path / "aw-server-rust.exe"
+    sync = tmp_path / "aw-sync.exe"
+    server.write_bytes(b"server")
+    sync.write_bytes(b"sync")
+    monkeypatch.setattr(wb.shutil, "which", lambda name: None)
+
+    assert wb.find_aw_sync([server, sync]) == sync
+
+
 def _fake_sync_runner(command):
     staging = Path(command[2])
     db = staging / "my-pc" / "device123" / "sync.db"
@@ -353,10 +363,12 @@ def _fake_sync_runner(command):
 def test_run_backup_success_and_status(tmp_path):
     cfg = make_cfg(url="http://127.0.0.1:9/unused")
     client = FakeClient()
+    aw_sync = tmp_path / "aw-sync.exe"
+    aw_sync.write_bytes(b"fake aw-sync")
     outcome = wb.run_backup(
         cfg,
         5600,
-        aw_sync_candidates=[Path(sys.executable)],  # any existing file
+        aw_sync_candidates=[aw_sync],
         client=client,
         sync_runner=_fake_sync_runner,
     )
@@ -367,7 +379,7 @@ def test_run_backup_success_and_status(tmp_path):
     outcome = wb.run_backup(
         cfg,
         5600,
-        aw_sync_candidates=[Path(sys.executable)],
+        aw_sync_candidates=[aw_sync],
         client=client,
         sync_runner=_fake_sync_runner,
     )
@@ -388,15 +400,17 @@ def test_run_backup_missing_aw_sync(monkeypatch):
     assert status is not None and not status.success
 
 
-def test_run_backup_empty_staging_fails():
+def test_run_backup_empty_staging_fails(tmp_path):
     def empty_runner(command):
         return None
 
+    aw_sync = tmp_path / "aw-sync.exe"
+    aw_sync.write_bytes(b"fake aw-sync")
     with pytest.raises(wb.BackupError):
         wb.run_backup(
             make_cfg(),
             5600,
-            aw_sync_candidates=[Path(sys.executable)],
+            aw_sync_candidates=[aw_sync],
             client=FakeClient(),
             sync_runner=empty_runner,
         )

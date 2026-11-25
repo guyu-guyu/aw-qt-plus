@@ -549,8 +549,14 @@ def status_path(profile: str = DEFAULT_PROFILE) -> Path:
 
 def find_aw_sync(candidate_paths: List[Path]) -> Optional[Path]:
     for candidate in candidate_paths:
-        if candidate and Path(candidate).is_file():
-            return Path(candidate)
+        if not candidate:
+            continue
+        path = Path(candidate)
+        # The tray manager also exposes aw-server-rust.exe from the same
+        # bundled directory.  Never select the first executable blindly:
+        # aw-server-rust does not accept aw-sync's --sync-dir option.
+        if path.is_file() and path.stem.lower() == "aw-sync":
+            return path
     found = shutil.which("aw-sync")
     return Path(found) if found else None
 
